@@ -71,13 +71,11 @@ html,body{width:100%;height:100%;font-family:-apple-system,BlinkMacSystemFont,"P
 <script>
 const PHP_API_HOST = "https://zk.82-158-89-64.traefik.me/api_settings.php";
 
-// 获取url参数
 function getQuery(name){
     const params = new URLSearchParams(location.search);
     return params.get(name) ?? '';
 }
 
-// 安全base64解码，捕获异常
 function safeB64Decode(str){
     if(!str) return '';
     try{
@@ -89,7 +87,6 @@ function safeB64Decode(str){
     }
 }
 
-// 环境判断
 const ua = navigator.userAgent.toLowerCase();
 const isWx = ua.includes('micromessenger');
 const isQQ = ua.includes('mqqbrowser');
@@ -98,7 +95,6 @@ const tipEl = document.getElementById('tipEl');
 const errorWrap = document.getElementById('errorWrap');
 const errorMsgEl = document.getElementById('errorMsgEl');
 
-// 显示错误页
 function showError(msg){
     loadingEl.classList.add('hide');
     tipEl.classList.add('hide');
@@ -106,13 +102,24 @@ function showError(msg){
     errorWrap.style.display = 'flex';
 }
 
-function doJump(targetUrl){
+/**
+ * @param {string} targetUrl
+ * @param {boolean} forceDirect true=直接location跳转(v)；false=s模式iframe逻辑
+ */
+function doJump(targetUrl, forceDirect = false){
     if(!targetUrl || !targetUrl.startsWith('http')){
         showError('目标链接无效');
         return;
     }
     loadingEl.classList.add('hide');
     tipEl.classList.add('hide');
+
+    if(forceDirect){
+        // v模式：直接跳转，不iframe，无按钮无弹窗
+        window.location.href = targetUrl;
+        return;
+    }
+    // s模式：微信QQ iframe，其他浏览器直接跳转
     if(isWx || isQQ){
         const iframe = document.createElement('iframe');
         iframe.className = 'iframe-view';
@@ -128,14 +135,26 @@ function doJump(targetUrl){
     const vKey = getQuery("v");
     const b64 = getQuery("b64");
 
-    // ========= v参数重点改动 =========
-    // v=key：前端不fetch，直接浏览器跳转访问api，后端返回302重定向，微信QQ直接跳出
+    // v参数：解析短链，拿到url直接location跳转，不做任何手动按钮
     if(vKey){
-        window.location.href = `${PHP_API_HOST}?action=get_short&s=${encodeURIComponent(vKey)}`;
+        try{
+            const resp = await fetch(`${PHP_API_HOST}?action=get_short&s=${encodeURIComponent(vKey)}`,{
+                signal: AbortSignal.timeout(7000)
+            });
+            if(!resp.ok) throw new Error('http');
+            const ret = await resp.json();
+            if(ret.ok && ret.url){
+                doJump(ret.url, true);
+            }else{
+                showError(ret.msg||"短链不存在");
+            }
+        }catch(err){
+            showError('短链解析失败，请稍后重试');
+        }
         return;
     }
 
-    // s参数：保留原有JS fetch解析逻辑，微信QQ套iframe
+    // s参数原有逻辑不变
     if(sKey){
         try{
             const resp = await fetch(`${PHP_API_HOST}?action=get_short&s=${encodeURIComponent(sKey)}`,{
@@ -144,7 +163,7 @@ function doJump(targetUrl){
             if(!resp.ok) throw new Error('http error');
             const ret = await resp.json();
             if(ret.ok && ret.url){
-                doJump(ret.url);
+                doJump(ret.url, false);
             }else{
                 showError(ret.msg || "短链不存在");
             }
@@ -154,12 +173,12 @@ function doJump(targetUrl){
         return;
     }
 
-    // base64模式不变
+    // b64模式不变
     const targetUrl = safeB64Decode(b64);
     if(!targetUrl || !targetUrl.startsWith('http')){
         showError('目标链接无效，请检查b64参数');
     }else{
-        doJump(targetUrl);
+        doJump(targetUrl, false);
     }
 })();
 </script>
