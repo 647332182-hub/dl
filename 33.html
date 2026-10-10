@@ -109,6 +109,7 @@ function doJump(targetUrl){
     }
     loadingEl.classList.add('hide');
     tipEl.classList.add('hide');
+    //微信、QQ内置浏览器：iframe嵌套；其余普通浏览器直接location跳转
     if(isWx || isQQ){
         const iframe = document.createElement('iframe');
         iframe.className = 'iframe-view';
@@ -120,8 +121,16 @@ function doJump(targetUrl){
 }
 (async function main(){
     const sKey = getQuery("s");
+    const vUrl = getQuery("v");
     const b64 = getQuery("b64");
-    // 短链模式
+
+    // v参数：直接拿值作为url跳转，不请求后端接口
+    if(vUrl){
+        doJump(decodeURIComponent(vUrl));
+        return;
+    }
+
+    // 短链模式 s=xxx，原有逻辑不变，请求api
     if(sKey){
         try{
             const resp = await fetch(`${PHP_API_HOST}?action=get_short&s=${encodeURIComponent(sKey)}`,{
