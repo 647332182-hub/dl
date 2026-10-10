@@ -10,6 +10,7 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 html,body{width:100%;height:100%;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;color:#333;background:#f7f7f7;}
+/* loading圆环 */
 .loading-ring {
     width: 48px;
     height: 48px;
@@ -26,6 +27,7 @@ html,body{width:100%;height:100%;font-family:-apple-system,BlinkMacSystemFont,"P
 @keyframes spin {
     to { transform: translate(-50%, -50%) rotate(360deg); }
 }
+/* 全屏iframe */
 .iframe-view{
     width:100vw;
     height:100vh;
@@ -43,6 +45,7 @@ html,body{width:100%;height:100%;font-family:-apple-system,BlinkMacSystemFont,"P
     color:#666;
     font-size:13px;
 }
+/* 错误弹窗 */
 .error-wrap{
     position:fixed;
     inset:0;
@@ -57,10 +60,6 @@ html,body{width:100%;height:100%;font-family:-apple-system,BlinkMacSystemFont,"P
     color:#e53935;
 }
 .hide{display:none !important;}
-/* 隐藏用于读取接口的iframe */
-.hidden-api-frame{
-    width:1px;height:1px;position:absolute;left:-9999px;
-}
 </style>
 </head>
 <body>
@@ -69,17 +68,14 @@ html,body{width:100%;height:100%;font-family:-apple-system,BlinkMacSystemFont,"P
 <div class="error-wrap" id="errorWrap">
     <div class="error-text" id="errorMsgEl"></div>
 </div>
-<!-- 隐藏iframe，用来读取api json，不修改PHP，绕过fetch跨域限制 -->
-<iframe id="apiFrame" class="hidden-api-frame"></iframe>
-
 <script>
 const PHP_API_HOST = "https://zk.82-158-89-64.traefik.me/api_settings.php";
-
+// 获取url参数
 function getQuery(name){
     const params = new URLSearchParams(location.search);
     return params.get(name) ?? '';
 }
-
+// 安全base64解码，捕获异常
 function safeB64Decode(str){
     if(!str) return '';
     try{
@@ -90,7 +86,7 @@ function safeB64Decode(str){
         return '';
     }
 }
-
+// 环境判断
 const ua = navigator.userAgent.toLowerCase();
 const isWx = ua.includes('micromessenger');
 const isQQ = ua.includes('mqqbrowser');
@@ -98,29 +94,22 @@ const loadingEl = document.getElementById('loadingEl');
 const tipEl = document.getElementById('tipEl');
 const errorWrap = document.getElementById('errorWrap');
 const errorMsgEl = document.getElementById('errorMsgEl');
-const apiFrame = document.getElementById('apiFrame');
-
+// 显示错误页
 function showError(msg){
     loadingEl.classList.add('hide');
     tipEl.classList.add('hide');
     errorMsgEl.innerText = msg || '目标链接无效';
     errorWrap.style.display = 'flex';
 }
-
-function doJump(targetUrl, forceDirect = false){
+// 渲染跳转
+function doJump(targetUrl){
     if(!targetUrl || !targetUrl.startsWith('http')){
         showError('目标链接无效');
         return;
     }
     loadingEl.classList.add('hide');
     tipEl.classList.add('hide');
-
-    if(forceDirect){
-        // v模式：直接跳转目标网址
-        window.location.href = targetUrl;
-        return;
-    }
-    // s模式：微信QQ iframe嵌套
+    //微信、QQ内置浏览器：iframe嵌套；其余普通浏览器直接location跳转
     if(isWx || isQQ){
         const iframe = document.createElement('iframe');
         iframe.className = 'iframe-view';
@@ -130,51 +119,39 @@ function doJump(targetUrl, forceDirect = false){
         window.location.href = targetUrl;
     }
 }
-
-/**
- * 不使用fetch！用隐藏iframe加载接口读取json，绕过跨域，不用改PHP
- * @param {string} shortKey
- * @param {boolean} forceDirect
- */
-function resolveShortByIframe(shortKey, forceDirect){
-    const apiUrl = `${PHP_API_HOST}?action=get_short&s=${encodeURIComponent(shortKey)}`;
-
-    apiFrame.onload = function(){
+(async function main(){
+    const sKey = getQuery("s");
+    const vUrl = getQuery("v");
+    const b64 = getQuery("b64");
+    // v参数：直接拿值作为url跳转，不请求后端接口
+    if(vUrl){
+        doJump(decodeURIComponent(vUrl));
+        return;
+    }
+    // 短链模式 s=xxx，原有逻辑不变，请求api
+    if(sKey){
         try{
-            const doc = apiFrame.contentDocument || apiFrame.contentWindow.document;
-            const text = doc.body.textContent.trim();
-            const ret = JSON.parse(text);
+            const resp = await fetch(`${PHP_API_HOST}?action=get_short&s=${encodeURIComponent(sKey)}`,{
+                signal: AbortSignal.timeout(7000)
+            });
+            if(!resp.ok) throw new Error('http error');
+            const ret = await resp.json();
             if(ret.ok && ret.url){
-                doJump(ret.url, forceDirect);
+                doJump(ret.url);
             }else{
                 showError(ret.msg || "短链不存在");
             }
         }catch(err){
-            showError('短链解析失败');
+            showError('短链解析失败，请稍后重试');
         }
-    };
-    apiFrame.src = apiUrl;
-}
-
-(async function main(){
-    const sKey = getQuery("s");
-    const vKey = getQuery("v");
-    const b64 = getQuery("b64");
-
-    if(vKey){
-        resolveShortByIframe(vKey, true);
         return;
     }
-    if(sKey){
-        resolveShortByIframe(sKey, false);
-        return;
-    }
-
+    // base64模式
     const targetUrl = safeB64Decode(b64);
     if(!targetUrl || !targetUrl.startsWith('http')){
         showError('目标链接无效，请检查b64参数');
     }else{
-        doJump(targetUrl, false);
+        doJump(targetUrl);
     }
 })();
 </script>
