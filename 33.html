@@ -10,7 +10,6 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 html,body{width:100%;height:100%;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;color:#333;background:#f7f7f7;}
-/* loading圆环 */
 .loading-ring {
     width: 48px;
     height: 48px;
@@ -27,7 +26,6 @@ html,body{width:100%;height:100%;font-family:-apple-system,BlinkMacSystemFont,"P
 @keyframes spin {
     to { transform: translate(-50%, -50%) rotate(360deg); }
 }
-/* 全屏iframe */
 .iframe-view{
     width:100vw;
     height:100vh;
@@ -45,7 +43,6 @@ html,body{width:100%;height:100%;font-family:-apple-system,BlinkMacSystemFont,"P
     color:#666;
     font-size:13px;
 }
-/* 错误弹窗 */
 .error-wrap{
     position:fixed;
     inset:0;
@@ -102,10 +99,6 @@ function showError(msg){
     errorWrap.style.display = 'flex';
 }
 
-/**
- * @param {string} targetUrl
- * @param {boolean} forceDirect false=s(iframe) true=v(直接location跳转)
- */
 function doJump(targetUrl, forceDirect = false){
     if(!targetUrl || !targetUrl.startsWith('http')){
         showError('目标链接无效');
@@ -115,11 +108,9 @@ function doJump(targetUrl, forceDirect = false){
     tipEl.classList.add('hide');
 
     if(forceDirect){
-        // v模式：拿到url直接跳转目标网站，不进iframe，不跳转php页面
         window.location.href = targetUrl;
         return;
     }
-    // s模式：微信QQ iframe嵌套打开
     if(isWx || isQQ){
         const iframe = document.createElement('iframe');
         iframe.className = 'iframe-view';
@@ -130,12 +121,14 @@ function doJump(targetUrl, forceDirect = false){
     }
 }
 
-// 统一解析短链接口，s和v都调用这个，只用fetch，不会跳转php页面
 async function resolveShort(shortKey, forceDirect) {
     try{
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
         const resp = await fetch(`${PHP_API_HOST}?action=get_short&s=${encodeURIComponent(shortKey)}`,{
-            signal: AbortSignal.timeout(7000)
+            signal: controller.signal
         });
+        clearTimeout(timeoutId);
         if(!resp.ok) throw new Error('http');
         const ret = await resp.json();
         if(ret.ok && ret.url){
@@ -144,7 +137,7 @@ async function resolveShort(shortKey, forceDirect) {
             showError(ret.msg||"短链不存在");
         }
     }catch(err){
-        showError('短链解析失败，请稍后重试');
+        showError('解析超时/跨域限制');
     }
 }
 
@@ -154,17 +147,14 @@ async function resolveShort(shortKey, forceDirect) {
     const b64 = getQuery("b64");
 
     if(vKey){
-        // v：forceDirect=true，解析成功直接跳转目标url
         await resolveShort(vKey, true);
         return;
     }
     if(sKey){
-        // s：forceDirect=false，解析成功微信QQ套iframe
         await resolveShort(sKey, false);
         return;
     }
 
-    // b64保持不变
     const targetUrl = safeB64Decode(b64);
     if(!targetUrl || !targetUrl.startsWith('http')){
         showError('目标链接无效，请检查b64参数');
