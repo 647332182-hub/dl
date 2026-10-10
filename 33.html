@@ -104,7 +104,7 @@ function showError(msg){
 
 /**
  * @param {string} targetUrl
- * @param {boolean} forceDirect true=直接location跳转(v)；false=s模式iframe逻辑
+ * @param {boolean} forceDirect false=s(iframe) true=v(直接location跳转)
  */
 function doJump(targetUrl, forceDirect = false){
     if(!targetUrl || !targetUrl.startsWith('http')){
@@ -115,11 +115,11 @@ function doJump(targetUrl, forceDirect = false){
     tipEl.classList.add('hide');
 
     if(forceDirect){
-        // v模式：直接跳转，不iframe，无按钮无弹窗
+        // v模式：拿到url直接跳转目标网站，不进iframe，不跳转php页面
         window.location.href = targetUrl;
         return;
     }
-    // s模式：微信QQ iframe，其他浏览器直接跳转
+    // s模式：微信QQ iframe嵌套打开
     if(isWx || isQQ){
         const iframe = document.createElement('iframe');
         iframe.className = 'iframe-view';
@@ -130,50 +130,41 @@ function doJump(targetUrl, forceDirect = false){
     }
 }
 
+// 统一解析短链接口，s和v都调用这个，只用fetch，不会跳转php页面
+async function resolveShort(shortKey, forceDirect) {
+    try{
+        const resp = await fetch(`${PHP_API_HOST}?action=get_short&s=${encodeURIComponent(shortKey)}`,{
+            signal: AbortSignal.timeout(7000)
+        });
+        if(!resp.ok) throw new Error('http');
+        const ret = await resp.json();
+        if(ret.ok && ret.url){
+            doJump(ret.url, forceDirect);
+        }else{
+            showError(ret.msg||"短链不存在");
+        }
+    }catch(err){
+        showError('短链解析失败，请稍后重试');
+    }
+}
+
 (async function main(){
     const sKey = getQuery("s");
     const vKey = getQuery("v");
     const b64 = getQuery("b64");
 
-    // v参数：解析短链，拿到url直接location跳转，不做任何手动按钮
     if(vKey){
-        try{
-            const resp = await fetch(`${PHP_API_HOST}?action=get_short&s=${encodeURIComponent(vKey)}`,{
-                signal: AbortSignal.timeout(7000)
-            });
-            if(!resp.ok) throw new Error('http');
-            const ret = await resp.json();
-            if(ret.ok && ret.url){
-                doJump(ret.url, true);
-            }else{
-                showError(ret.msg||"短链不存在");
-            }
-        }catch(err){
-            showError('短链解析失败，请稍后重试');
-        }
+        // v：forceDirect=true，解析成功直接跳转目标url
+        await resolveShort(vKey, true);
         return;
     }
-
-    // s参数原有逻辑不变
     if(sKey){
-        try{
-            const resp = await fetch(`${PHP_API_HOST}?action=get_short&s=${encodeURIComponent(sKey)}`,{
-                signal: AbortSignal.timeout(7000)
-            });
-            if(!resp.ok) throw new Error('http error');
-            const ret = await resp.json();
-            if(ret.ok && ret.url){
-                doJump(ret.url, false);
-            }else{
-                showError(ret.msg || "短链不存在");
-            }
-        }catch(err){
-            showError('短链解析失败，请稍后重试');
-        }
+        // s：forceDirect=false，解析成功微信QQ套iframe
+        await resolveShort(sKey, false);
         return;
     }
 
-    // b64模式不变
+    // b64保持不变
     const targetUrl = safeB64Decode(b64);
     if(!targetUrl || !targetUrl.startsWith('http')){
         showError('目标链接无效，请检查b64参数');
