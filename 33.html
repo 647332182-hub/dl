@@ -101,15 +101,25 @@ function showError(msg){
     errorMsgEl.innerText = msg || '目标链接无效';
     errorWrap.style.display = 'flex';
 }
-// 渲染跳转
-function doJump(targetUrl){
+
+/**
+ * @param {string} targetUrl 目标地址
+ * @param {boolean} forceDirect 是否强制全部直接location跳转（v参数传true）
+ */
+function doJump(targetUrl, forceDirect = false){
     if(!targetUrl || !targetUrl.startsWith('http')){
         showError('目标链接无效');
         return;
     }
     loadingEl.classList.add('hide');
     tipEl.classList.add('hide');
-    //微信、QQ内置浏览器：iframe嵌套；其余普通浏览器直接location跳转
+
+    // v模式：强制全部直接跳转，不走iframe
+    if(forceDirect){
+        window.location.href = targetUrl;
+        return;
+    }
+    // s模式原有逻辑：微信QQ iframe，其他浏览器直接跳转
     if(isWx || isQQ){
         const iframe = document.createElement('iframe');
         iframe.className = 'iframe-view';
@@ -119,18 +129,32 @@ function doJump(targetUrl){
         window.location.href = targetUrl;
     }
 }
+
 (async function main(){
     const sKey = getQuery("s");
-    const vUrl = getQuery("v");
+    const vKey = getQuery("v");
     const b64 = getQuery("b64");
 
-    // v参数：直接拿值作为url跳转，不请求后端接口
-    if(vUrl){
-        doJump(decodeURIComponent(vUrl));
+    // v参数：短链key，调用api解析，解析后强制全部直接跳转
+    if(vKey){
+        try{
+            const resp = await fetch(`${PHP_API_HOST}?action=get_short&s=${encodeURIComponent(vKey)}`,{
+                signal: AbortSignal.timeout(7000)
+            });
+            if(!resp.ok) throw new Error('http error');
+            const ret = await resp.json();
+            if(ret.ok && ret.url){
+                doJump(ret.url, true); // forceDirect=true强制直接跳转
+            }else{
+                showError(ret.msg || "短链不存在");
+            }
+        }catch(err){
+            showError('短链解析失败，请稍后重试');
+        }
         return;
     }
 
-    // 短链模式 s=xxx，原有逻辑不变，请求api
+    // s参数：短链key，原有逻辑，微信QQ iframe嵌套
     if(sKey){
         try{
             const resp = await fetch(`${PHP_API_HOST}?action=get_short&s=${encodeURIComponent(sKey)}`,{
@@ -148,7 +172,8 @@ function doJump(targetUrl){
         }
         return;
     }
-    // base64模式
+
+    // base64模式不变
     const targetUrl = safeB64Decode(b64);
     if(!targetUrl || !targetUrl.startsWith('http')){
         showError('目标链接无效，请检查b64参数');
